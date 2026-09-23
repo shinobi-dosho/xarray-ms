@@ -52,6 +52,10 @@ class InvalidPartitionKey(ValueError):
   """Raised when a string representing a partition key is invalid"""
 
 
+class MissingEncodingError(ValueError):
+  """Raised when encoding information is missing"""
+
+
 class PartitioningError(ValueError):
   """Raised when a logical error is encountered during Measurement Set partitioning"""
 
@@ -66,3 +70,30 @@ class MissingQuantumUnits(ValueError):
 
 class MultipleQuantumUnits(ValueError):
   """Raised when there are multiple QuantumUnit value types in the column"""
+
+
+class MismatchedWriteRegion(ValueError):
+  """Raised when attempting to write to a chunk of data whose dimensionality
+  does not match the target column"""
+
+
+class NonCanonicalColumnWarning(UserWarning):
+  """Warning raised when a created column deviates from
+  the canonical Measurement Set v2 column definition"""
+
+
+class ColumnCreationError(ValueError):
+  """Raised when columns required for writing are missing
+  from the Measurement Set after column creation"""
+
+
+class FreshMSv2PlanError(ValueError):
+  """Invalid input for fresh MSv2 preflight planning."""
+
+
+class FreshMSv2TargetError(FreshMSv2PlanError):
+  """The destination cannot be used for a fresh write."""
+
+
+class FreshMSv2ValidationError(FreshMSv2PlanError):
+  """The source tree or a visibility mapping is invalid."""
