@@ -6,12 +6,18 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
-from xarray import DataTree
+from xarray import DataTree, Variable
 
 from xarray_ms.backend.msv2.measure_encoding import (
   FixedMeasureEncoding,
   check_shared_reference,
   encode_fixed_measure,
+)
+from xarray_ms.backend.msv2.metadata_plan import (
+  MetadataRows,
+  PartitionKeys,
+  build_metadata,
+  extract_metadata,
 )
 from xarray_ms.errors import (
   FreshMSv2TargetError,
@@ -59,6 +65,17 @@ RESERVED_COLUMNS = frozenset(
     "PULSAR_BIN",
   }
 )
+UNSUPPORTED_OPTIONAL_METADATA = frozenset(
+  {
+    "field_and_source_ephemeris_xds",
+    "gain_curve_xds",
+    "phase_calibration_xds",
+    "phased_array_xds",
+    "pointing_xds",
+    "system_calibration_xds",
+    "weather_xds",
+  }
+)
 
 
 @dataclass(frozen=True)
@@ -74,6 +91,7 @@ class FreshMSv2Partition:
   antenna: str
   additional_correlated_data: tuple[tuple[str, str], ...]
   measures: tuple[FixedMeasureEncoding, ...]
+  foreign_keys: PartitionKeys
 
 
 @dataclass(frozen=True)
@@ -84,6 +102,7 @@ class FreshMSv2Plan:
   data_group: str
   partitions: tuple[FreshMSv2Partition, ...]
   visibility_mappings: tuple[tuple[str, str], ...]
+  metadata: MetadataRows
 
 
 def _target_path(target: str | os.PathLike[str]) -> str:
@@ -206,6 +225,7 @@ def plan_fresh_msv2(
     raise FreshMSv2ValidationError("No correlated datasets found in DataTree")
 
   partitions = []
+  extracted = []
   shared_measures: dict[str, FixedMeasureEncoding] = {}
   for node in nodes:
     ds = node.to_dataset(inherit=True)
@@ -237,6 +257,17 @@ def plan_fresh_msv2(
       raise FreshMSv2ValidationError(
         f"Partition {node.path}: required antenna_xds child with type 'antenna' "
         "is missing or invalid"
+      )
+    unsupported_metadata = sorted(
+      name
+      for name, child in node.children.items()
+      if name in UNSUPPORTED_OPTIONAL_METADATA
+      or child.attrs.get("type") == "field_and_source_ephemeris"
+    )
+    if unsupported_metadata:
+      raise FreshMSv2ValidationError(
+        f"Partition {node.path}: unsupported optional metadata dataset(s) "
+        f"{unsupported_metadata}"
       )
     selected_group = _group(node, data_group, SEMANTIC_ROLES)
     base = _variable(node, selected_group, "correlated_data", data_group)
@@ -288,24 +319,52 @@ def plan_fresh_msv2(
       ),
       encode_fixed_measure(uvw.variable, node.path, selected_group["uvw"], "MAIN::UVW"),
     ]
+    reference = ds["frequency"].attrs.get("reference_frequency")
+    if isinstance(reference, Mapping) and isinstance(reference.get("attrs"), Mapping):
+      reference_data = np.asarray(reference.get("data"))
+      if reference_data.ndim != 0:
+        raise FreshMSv2ValidationError(
+          f"Partition {node.path} frequency: reference_frequency data must be scalar"
+        )
+      reference_measure = encode_fixed_measure(
+        Variable((), reference_data.item(), dict(reference["attrs"])),
+        node.path,
+        "reference_frequency",
+        "SPECTRAL_WINDOW::REF_FREQUENCY",
+      )
+      measures.append(reference_measure)
+    else:
+      raise FreshMSv2ValidationError(
+        f"Partition {node.path} frequency: reference_frequency "
+        "requires data and measure attrs"
+      )
     for metadata_node, variable_name, column in (
       (antenna_node, "ANTENNA_POSITION", "ANTENNA::POSITION"),
       (tree.root[field], "FIELD_PHASE_CENTER_DIRECTION", "FIELD::PHASE_DIR"),
     ):
-      if variable_name in metadata_node.data_vars:
-        measures.append(
-          encode_fixed_measure(
-            metadata_node.data_vars[variable_name].variable,
-            metadata_node.path,
-            variable_name,
-            column,
-          )
+      if variable_name not in metadata_node.data_vars:
+        raise FreshMSv2ValidationError(
+          f"Partition {node.path}: {metadata_node.path} requires "
+          f"{variable_name!r} as a data variable"
         )
+      measures.append(
+        encode_fixed_measure(
+          metadata_node.data_vars[variable_name].variable,
+          metadata_node.path,
+          variable_name,
+          column,
+        )
+      )
     for measure in measures:
       if previous := shared_measures.get(measure.column):
         check_shared_reference(previous, measure)
       else:
         shared_measures[measure.column] = measure
+    extracted.append(
+      extract_metadata(
+        node, antenna_node, tree.root[field], measures[1].frame, reference_measure.frame
+      )
+    )
     additional = []
     for name, _ in mappings:
       extra_group = _group(node, name, ("correlated_data",))
@@ -321,7 +380,7 @@ def plan_fresh_msv2(
         )
       additional.append((name, extra_group["correlated_data"]))
     partitions.append(
-      FreshMSv2Partition(
+      (
         node.path,
         selected_group["correlated_data"],
         selected_group["flag"],
@@ -333,8 +392,17 @@ def plan_fresh_msv2(
         tuple(measures),
       )
     )
+  metadata, foreign_keys = build_metadata(extracted)
+  resolved_partitions = [
+    FreshMSv2Partition(*partition, keys)
+    for partition, keys in zip(partitions, foreign_keys, strict=True)
+  ]
   return FreshMSv2Plan(
-    destination, data_group, tuple(partitions), ((data_group, "DATA"), *mappings)
+    destination,
+    data_group,
+    tuple(resolved_partitions),
+    ((data_group, "DATA"), *mappings),
+    metadata,
   )
 
 
