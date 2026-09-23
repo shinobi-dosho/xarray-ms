@@ -1,5 +1,9 @@
 # shinobi-dosho -- conventions for coding agents
 
+> **Fork scope:** The rules/guidelines in this file apply only to the
+> `shinobi-dosho/xarray-ms` fork. Delete this file if it finds itself in another
+> fork or the main repository.
+
 Organisation-wide baseline. Every repository here also has its own
 `AGENTS.md` carrying the design conventions specific to it -- read that
 one too, and where the two disagree, **the repository's file wins**. This
