@@ -85,3 +85,15 @@ class NonCanonicalColumnWarning(UserWarning):
 class ColumnCreationError(ValueError):
   """Raised when columns required for writing are missing
   from the Measurement Set after column creation"""
+
+
+class FreshMSv2PlanError(ValueError):
+  """Invalid input for fresh MSv2 preflight planning."""
+
+
+class FreshMSv2TargetError(FreshMSv2PlanError):
+  """The destination cannot be used for a fresh write."""
+
+
+class FreshMSv2ValidationError(FreshMSv2PlanError):
+  """The source tree or a visibility mapping is invalid."""

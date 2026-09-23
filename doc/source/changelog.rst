@@ -3,6 +3,12 @@
 Changelog
 =========
 
+Unreleased
+----------
+* Add pure fresh-MS v2 preflight planning via ``plan_fresh_msv2`` and
+  ``DataTree.plan_msv2``. Planning validates visibility data groups and
+  destination columns without creating or writing a Measurement Set.
+
 0.5.11 (22-09-2026)
 ------------------
 * Add an ``AGENTS.MD`` (:pr:`175`).
