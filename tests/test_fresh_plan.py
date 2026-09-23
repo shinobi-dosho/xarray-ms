@@ -18,12 +18,12 @@ COORDS = {
   "time": [1, 2],
   "baseline_id": [0],
   "frequency": [10, 20],
-  "polarization": [0, 1],
+  "polarization": ["XX", "YY"],
   "uvw_label": ["u", "v", "w"],
   "baseline_antenna1_name": ("baseline_id", ["A"]),
   "baseline_antenna2_name": ("baseline_id", ["B"]),
   "field_name": ("time", ["field", "field"]),
-  "scan_name": ("time", ["scan", "scan"]),
+  "scan_name": ("time", ["1", "1"], {"scan_intents": ["OBSERVE_TARGET"]}),
 }
 
 
@@ -64,20 +64,86 @@ def make_tree(paths=("/part",), extra=False):
         "frequency": (
           "frequency",
           [10, 20],
-          {"type": "spectral_coord", "units": "Hz", "observer": "TOPO"},
+          {
+            "type": "spectral_coord",
+            "units": "Hz",
+            "observer": "TOPO",
+            "spectral_window_name": "spw",
+            "spectral_window_intents": ["science"],
+            "reference_frequency": {
+              "attrs": {"type": "spectral_coord", "units": "Hz", "observer": "TOPO"},
+              "data": 10.0,
+            },
+            "channel_width": {
+              "attrs": {"type": "quantity", "units": "Hz"},
+              "data": 10.0,
+            },
+          },
         ),
       },
       attrs={
         "type": "visibility",
         "data_groups": groups,
-        "observation_info": {},
-        "processor_info": {},
+        "observation_info": {
+          "observer": ["Observer"],
+          "project_UID": "project",
+          "release_date": "2020-01-01T00:00:00+00:00",
+        },
+        "processor_info": {"type": "CORRELATOR", "sub_type": "test"},
       },
     )
     datasets[f"{path}/field_and_source_base_xds"] = xr.Dataset(
-      attrs={"type": "field_and_source"}
+      {
+        "FIELD_PHASE_CENTER_DIRECTION": (
+          ("field_name", "sky_dir_label"),
+          [[0.1, 0.2]],
+          {"type": "sky_coord", "units": "rad", "frame": "icrs"},
+        )
+      },
+      coords={
+        "field_name": ["field"],
+        "sky_dir_label": ["ra", "dec"],
+        "source_name": ("field_name", ["source"]),
+      },
+      attrs={"type": "field_and_source"},
     )
-    datasets[f"{path}/antenna_xds"] = xr.Dataset(attrs={"type": "antenna"})
+    datasets[f"{path}/antenna_xds"] = xr.Dataset(
+      {
+        "ANTENNA_POSITION": (
+          ("antenna_name", "cartesian_pos_label"),
+          [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+          {"type": "location", "units": "m", "frame": "ITRS"},
+        ),
+        "ANTENNA_DISH_DIAMETER": (
+          "antenna_name",
+          [12.0, 12.0],
+          {"type": "quantity", "units": "m"},
+        ),
+        "ANTENNA_EFFECTIVE_DISH_DIAMETER": (
+          "antenna_name",
+          [12.0, 12.0],
+          {"type": "quantity", "units": "m"},
+        ),
+        "ANTENNA_RECEPTOR_ANGLE": (
+          ("antenna_name", "receptor_label"),
+          [[0.0, 0.0], [0.0, 0.0]],
+          {"type": "quantity", "units": "rad"},
+        ),
+      },
+      coords={
+        "antenna_name": ["A", "B"],
+        "station_name": ("antenna_name", ["A", "B"]),
+        "mount": ("antenna_name", ["ALT-AZ", "ALT-AZ"]),
+        "telescope_name": ("antenna_name", ["scope", "scope"]),
+        "cartesian_pos_label": ["x", "y", "z"],
+        "receptor_label": ["pol_0", "pol_1"],
+        "polarization_type": (
+          ("antenna_name", "receptor_label"),
+          [["X", "Y"], ["X", "Y"]],
+        ),
+      },
+      attrs={"type": "antenna", "overall_telescope_name": "scope"},
+    )
   return xr.DataTree.from_dict(datasets)
 
 
@@ -95,6 +161,9 @@ def test_single_partition_is_pure_and_immutable(tmp_path):
     ("MAIN::TIME", "UTC"),
     ("SPECTRAL_WINDOW::CHAN_FREQ", "TOPO"),
     ("MAIN::UVW", "J2000"),
+    ("SPECTRAL_WINDOW::REF_FREQUENCY", "TOPO"),
+    ("ANTENNA::POSITION", "ITRF"),
+    ("FIELD::PHASE_DIR", "ICRS"),
   ]
   assert not target.exists()
   with pytest.raises(FrozenInstanceError):
@@ -122,28 +191,29 @@ def test_cross_partition_reference_conflict_requires_column(tmp_path):
   assert not (tmp_path / "fresh.ms").exists()
 
 
+def test_reference_frequency_has_independent_fixed_frame(tmp_path):
+  tree = make_tree()
+  tree["part"].ds.frequency.attrs["reference_frequency"]["attrs"]["observer"] = "lsrk"
+  plan = plan_fresh_msv2(tree, tmp_path / "fresh.ms")
+  assert plan.metadata.spectral_window_rows[0].frame == "TOPO"
+  assert plan.metadata.spectral_window_rows[0].reference_frame == "LSRK"
+  assert ("SPECTRAL_WINDOW::REF_FREQUENCY", "LSRK") in [
+    (measure.column, measure.frame) for measure in plan.partitions[0].measures
+  ]
+
+
+def test_cross_partition_reference_frequency_conflict(tmp_path):
+  tree = make_tree(("/one", "/two"))
+  tree["two"].ds.frequency.attrs["reference_frequency"]["attrs"]["observer"] = "lsrk"
+  with pytest.raises(
+    MeasureReferenceColumnRequired,
+    match=r"/one.*reference_frequency.*/two.*reference_frequency.*reference column",
+  ):
+    plan_fresh_msv2(tree, tmp_path / "fresh.ms")
+
+
 def test_optional_metadata_measures_are_encoded(tmp_path):
   tree = make_tree()
-  tree["part/antenna_xds"].ds = xr.Dataset(
-    {
-      "ANTENNA_POSITION": (
-        ("antenna", "cartesian"),
-        np.zeros((1, 3)),
-        {"type": "location", "units": "m", "frame": "ITRS"},
-      )
-    },
-    attrs={"type": "antenna"},
-  )
-  tree["part/field_and_source_base_xds"].ds = xr.Dataset(
-    {
-      "FIELD_PHASE_CENTER_DIRECTION": (
-        ("field", "sky"),
-        np.zeros((1, 2)),
-        {"type": "sky_coord", "units": "rad", "frame": "icrs"},
-      )
-    },
-    attrs={"type": "field_and_source"},
-  )
   measures = plan_fresh_msv2(tree, tmp_path / "fresh.ms").partitions[0].measures
   assert [(m.column, m.frame) for m in measures[-2:]] == [
     ("ANTENNA::POSITION", "ITRF"),
@@ -311,7 +381,9 @@ def test_required_metadata_nodes_and_field_type(tmp_path):
   with pytest.raises(FreshMSv2ValidationError, match="invalid type"):
     plan_fresh_msv2(tree, target)
   tree["part/field_and_source_base_xds"].attrs["type"] = "field_and_source_ephemeris"
-  with pytest.raises(FreshMSv2ValidationError, match="invalid type"):
+  with pytest.raises(
+    FreshMSv2ValidationError, match="invalid type|unsupported optional"
+  ):
     plan_fresh_msv2(tree, target)
 
 
@@ -436,6 +508,303 @@ def test_lazy_measure_payload_is_not_computed(tmp_path):
   tree["part"].ds = ds
   plan = plan_fresh_msv2(tree, tmp_path / "fresh.ms")
   assert plan.partitions[0].measures[2].frame == "J2000"
+
+
+def test_metadata_dedup_and_foreign_keys_independent_of_input_order(tmp_path):
+  first = plan_fresh_msv2(make_tree(("/z", "/a")), tmp_path / "one.ms")
+  second = plan_fresh_msv2(make_tree(("/a", "/z")), tmp_path / "two.ms")
+  assert first.metadata == second.metadata
+  assert tuple(p.foreign_keys for p in first.partitions) == tuple(
+    p.foreign_keys for p in second.partitions
+  )
+  rows = first.metadata
+  assert len(rows.antenna_rows) == len(rows.feed_rows) == 2
+  assert len(rows.field_rows) == len(rows.source_rows) == 1
+  assert len(rows.spectral_window_rows) == len(rows.polarization_rows) == 1
+  assert len(rows.data_description_rows) == len(rows.observation_rows) == 1
+  assert len(rows.processor_rows) == len(rows.state_rows) == 1
+  for partition in first.partitions:
+    keys = partition.foreign_keys
+    assert keys.antenna1_ids == (0,)
+    assert keys.antenna2_ids == (1,)
+    assert keys.field_ids == (0, 0)
+    assert keys.scan_numbers == (1, 1)
+    for ids, count in (
+      (keys.antenna1_ids + keys.antenna2_ids, len(rows.antenna_rows)),
+      (keys.field_ids, len(rows.field_rows)),
+      ((keys.data_desc_id,), len(rows.data_description_rows)),
+      ((keys.observation_id,), len(rows.observation_rows)),
+      ((keys.processor_id,), len(rows.processor_rows)),
+      ((keys.state_id,), len(rows.state_rows)),
+    ):
+      assert all(0 <= value < count for value in ids)
+    feed_pairs = {(row.antenna_id, row.feed_id) for row in rows.feed_rows}
+    assert set(zip(keys.antenna1_ids, keys.feed1_ids, strict=True)) <= feed_pairs
+    assert set(zip(keys.antenna2_ids, keys.feed2_ids, strict=True)) <= feed_pairs
+  assert rows.field_rows[0].source_id == 0
+  assert rows.feed_rows[0].spectral_window_id == -1
+
+
+def test_distinct_spw_polarization_and_feed_configs(tmp_path):
+  tree = make_tree(("/a", "/b"))
+  ds = tree["b"].to_dataset()
+  ds.frequency.attrs["spectral_window_name"] = "other"
+  ds = ds.assign_coords(polarization=["RR", "LL"])
+  tree["b"].ds = ds
+  antenna = tree["b/antenna_xds"].to_dataset()
+  antenna["ANTENNA_RECEPTOR_ANGLE"] = antenna.ANTENNA_RECEPTOR_ANGLE + 0.5
+  antenna = antenna.assign_coords(
+    polarization_type=(
+      ("antenna_name", "receptor_label"),
+      [["R", "L"], ["R", "L"]],
+    )
+  )
+  tree["b/antenna_xds"].ds = antenna
+  plan = plan_fresh_msv2(tree, tmp_path / "new.ms")
+  assert len(plan.metadata.spectral_window_rows) == 2
+  assert len(plan.metadata.polarization_rows) == 2
+  assert len(plan.metadata.data_description_rows) == 2
+  assert len(plan.metadata.feed_rows) == 4
+  assert (
+    plan.partitions[0].foreign_keys.data_desc_id
+    != plan.partitions[1].foreign_keys.data_desc_id
+  )
+  assert (
+    plan.partitions[0].foreign_keys.feed1_ids
+    != plan.partitions[1].foreign_keys.feed1_ids
+  )
+  assert {(r.antenna_id, r.feed_id) for r in plan.metadata.feed_rows} == {
+    (0, 0),
+    (0, 1),
+    (1, 0),
+    (1, 1),
+  }
+  assert {p.foreign_keys.feed1_ids[0] for p in plan.partitions} == {0, 1}
+  assert {p.foreign_keys.feed2_ids[0] for p in plan.partitions} == {0, 1}
+
+
+@pytest.mark.parametrize("kind", ["antenna", "field"])
+def test_cross_partition_semantic_conflicts(tmp_path, kind):
+  tree = make_tree(("/a", "/b"))
+  if kind == "antenna":
+    node = tree["b/antenna_xds"]
+    ds = node.to_dataset()
+    ds["ANTENNA_DISH_DIAMETER"] = (
+      "antenna_name",
+      [13.0, 12.0],
+      {"type": "quantity", "units": "m"},
+    )
+    ds["ANTENNA_EFFECTIVE_DISH_DIAMETER"] = (
+      "antenna_name",
+      [13.0, 12.0],
+      {"type": "quantity", "units": "m"},
+    )
+    node.ds = ds
+    pattern = "antenna 'A'.*conflicts with partition /a"
+  else:
+    node = tree["b/field_and_source_base_xds"]
+    ds = node.to_dataset()
+    ds["source_name"] = ("field_name", ["another"])
+    node.ds = ds
+    pattern = "field 'field'.*conflicts with partition /a"
+  with pytest.raises(FreshMSv2ValidationError, match=pattern):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+def test_missing_relationships_and_scan_number(tmp_path):
+  tree = make_tree()
+  ds = tree["part"].to_dataset()
+  ds = ds.assign_coords(baseline_antenna1_name=("baseline_id", ["missing"]))
+  tree["part"].ds = ds
+  with pytest.raises(
+    FreshMSv2ValidationError, match="baseline antenna 'missing'.*antenna_xds"
+  ):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+  tree = make_tree()
+  ds = tree["part"].to_dataset()
+  ds = ds.assign_coords(field_name=("time", ["absent", "field"]))
+  tree["part"].ds = ds
+  with pytest.raises(
+    FreshMSv2ValidationError, match="field 'absent'.*field_and_source"
+  ):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+  tree = make_tree()
+  ds = tree["part"].to_dataset()
+  ds = ds.assign_coords(
+    scan_name=("time", ["1", "1.5"], {"scan_intents": ["OBSERVE_TARGET"]})
+  )
+  tree["part"].ds = ds
+  with pytest.raises(FreshMSv2ValidationError, match="scan_name '1.5'.*integral"):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+def test_effective_diameter_must_not_be_dropped(tmp_path):
+  tree = make_tree()
+  node = tree["part/antenna_xds"]
+  ds = node.to_dataset()
+  ds["ANTENNA_EFFECTIVE_DISH_DIAMETER"] = (
+    "antenna_name",
+    [11.0, 12.0],
+    {"type": "quantity", "units": "m"},
+  )
+  node.ds = ds
+  with pytest.raises(FreshMSv2ValidationError, match="EFFECTIVE_DISH_DIAMETER differs"):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+def test_unknown_source_and_irregular_channel_width(tmp_path):
+  tree = make_tree()
+  field = tree["part/field_and_source_base_xds"]
+  fd = field.to_dataset()
+  fd["source_name"] = ("field_name", ["UNKNOWN"])
+  field.ds = fd
+  node = tree["part"]
+  ds = node.to_dataset()
+  ds.frequency.attrs["channel_width"]["data"] = np.nan
+  ds["CHANNEL_WIDTH"] = (
+    "frequency",
+    [9.0, 11.0],
+    {"type": "quantity", "units": "Hz"},
+  )
+  ds["EFFECTIVE_CHANNEL_WIDTH"] = (
+    "frequency",
+    [8.0, 10.0],
+    {"type": "quantity", "units": "Hz"},
+  )
+  ds.frequency.attrs["effective_channel_width"] = "EFFECTIVE_CHANNEL_WIDTH"
+  node.ds = ds
+  rows = plan_fresh_msv2(tree, tmp_path / "new.ms").metadata
+  assert rows.source_rows == ()
+  assert rows.field_rows[0].source_id == -1
+  assert rows.spectral_window_rows[0].channel_width == (9.0, 11.0)
+  assert rows.spectral_window_rows[0].effective_channel_width == (8.0, 10.0)
+
+
+def test_metadata_unit_validation(tmp_path):
+  tree = make_tree()
+  node = tree["part/antenna_xds"]
+  ds = node.to_dataset()
+  ds.ANTENNA_RECEPTOR_ANGLE.attrs["units"] = "deg"
+  node.ds = ds
+  with pytest.raises(FreshMSv2ValidationError, match="RECEPTOR_ANGLE.*'rad'"):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+def test_polarization_products_use_feed_receptor_order(tmp_path):
+  tree = make_tree()
+  node = tree["part"]
+  ds = node.to_dataset().isel(polarization=[1])
+  ds = ds.assign_coords(polarization=["YY"])
+  node.ds = ds
+  plan = plan_fresh_msv2(tree, tmp_path / "new.ms")
+  assert plan.metadata.polarization_rows[0].corr_product == ((1, 1),)
+
+
+def test_inconsistent_feed_receptor_order_is_rejected(tmp_path):
+  tree = make_tree()
+  node = tree["part/antenna_xds"]
+  ds = node.to_dataset()
+  ds = ds.assign_coords(
+    polarization_type=(
+      ("antenna_name", "receptor_label"),
+      [["X", "Y"], ["Y", "X"]],
+    )
+  )
+  node.ds = ds
+  with pytest.raises(FreshMSv2ValidationError, match="same receptor ordering"):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+def test_optional_metadata_is_not_silently_dropped(tmp_path):
+  tree = make_tree()
+  tree["part/pointing_xds"] = xr.DataTree(
+    dataset=xr.Dataset(attrs={"type": "pointing"})
+  )
+  with pytest.raises(
+    FreshMSv2ValidationError, match="unsupported optional metadata.*pointing_xds"
+  ):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+def test_ephemeris_sibling_is_not_silently_dropped(tmp_path):
+  tree = make_tree()
+  tree["part/ephemeris"] = xr.DataTree(
+    dataset=xr.Dataset(attrs={"type": "field_and_source_ephemeris"})
+  )
+  with pytest.raises(
+    FreshMSv2ValidationError, match="unsupported optional metadata.*ephemeris"
+  ):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+@pytest.mark.parametrize(
+  ("node_path", "variable"),
+  [
+    ("part/antenna_xds", "ANTENNA_POSITION"),
+    ("part/field_and_source_base_xds", "FIELD_PHASE_CENTER_DIRECTION"),
+  ],
+)
+def test_required_measure_metadata_must_be_data_variables(
+  tmp_path, node_path, variable
+):
+  tree = make_tree()
+  node = tree[node_path]
+  ds = node.to_dataset().set_coords(variable)
+  node.ds = ds
+  with pytest.raises(FreshMSv2ValidationError, match=rf"{variable!s}.*data variable"):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+def test_unsupported_source_content_is_not_silently_dropped(tmp_path):
+  tree = make_tree()
+  node = tree["part/field_and_source_base_xds"]
+  ds = node.to_dataset()
+  ds["SOURCE_DIRECTION"] = (
+    ("field_name", "sky_dir_label"),
+    [[0.1, 0.2]],
+    {"type": "sky_coord", "units": "rad", "frame": "icrs"},
+  )
+  node.ds = ds
+  with pytest.raises(
+    FreshMSv2ValidationError, match="unsupported FIELD/SOURCE.*SOURCE_DIRECTION"
+  ):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+def test_dangling_effective_channel_width_is_rejected(tmp_path):
+  tree = make_tree()
+  tree["part"].ds.frequency.attrs["effective_channel_width"] = "MISSING"
+  with pytest.raises(
+    FreshMSv2ValidationError, match="effective_channel_width.*missing variable"
+  ):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+def test_repeated_antenna_feed_configs_are_explicitly_unsupported(tmp_path):
+  tree = make_tree()
+  node = tree["part/antenna_xds"]
+  ds = node.to_dataset().assign_coords(antenna_name=["A", "A"])
+  node.ds = ds
+  with pytest.raises(
+    FreshMSv2ValidationError, match="multiple FEED configurations.*ambiguous"
+  ):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
+
+
+def test_equivalent_release_date_offsets_deduplicate(tmp_path):
+  tree = make_tree(("/one", "/two"))
+  tree["two"].attrs["observation_info"]["release_date"] = "2020-01-01T02:00:00+02:00"
+  plan = plan_fresh_msv2(tree, tmp_path / "new.ms")
+  assert len(plan.metadata.observation_rows) == 1
+
+
+def test_reference_frequency_data_must_be_scalar(tmp_path):
+  tree = make_tree()
+  tree["part"].ds.frequency.attrs["reference_frequency"]["data"] = [10.0]
+  with pytest.raises(
+    FreshMSv2ValidationError, match="reference_frequency data must be scalar"
+  ):
+    plan_fresh_msv2(tree, tmp_path / "new.ms")
 
 
 def test_plan_method_survives_legacy_writer_import_failure():

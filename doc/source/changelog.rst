@@ -5,6 +5,8 @@ Changelog
 
 Unreleased
 ----------
+* Plan deterministic MSv2 metadata rows and validated MAIN foreign keys from
+  MSv4 partition metadata without creating tables or reading visibility payloads.
 * Validate fixed MSv4 measure references during fresh-MS v2 preflight and carry
   immutable CASA column keywords in the plan for metadata creation.
 * Add pure fresh-MS v2 preflight planning via ``plan_fresh_msv2`` and
