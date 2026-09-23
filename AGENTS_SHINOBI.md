@@ -9,6 +9,15 @@ Organisation-wide baseline. Every repository here also has its own
 one too, and where the two disagree, **the repository's file wins**. This
 file only holds what is true across all of them.
 
+## Fork branch mapping exception
+
+In this fork only, `main` carries the upstream `write-support`
+architecture and version line. References in `AGENTS.md` that assign
+that architecture to a branch named `write-support` therefore apply to
+this fork's `main` branch. This exception overrides `AGENTS.md` only
+for branch/version mapping; `AGENTS.md` remains authoritative for every
+other conflict.
+
 ## Core rule
 
 Avoid unnecessary complexity like the plague.
