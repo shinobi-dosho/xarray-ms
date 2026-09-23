@@ -7,7 +7,11 @@ import pytest
 import xarray as xr
 
 from xarray_ms import plan_fresh_msv2
-from xarray_ms.errors import FreshMSv2TargetError, FreshMSv2ValidationError
+from xarray_ms.errors import (
+  FreshMSv2TargetError,
+  FreshMSv2ValidationError,
+  MeasureReferenceColumnRequired,
+)
 
 DIMS = ("time", "baseline_id", "frequency", "polarization")
 COORDS = {
@@ -39,14 +43,30 @@ def make_tree(paths=("/part",), extra=False):
       "VISIBILITY": (DIMS, np.ones((2, 1, 2, 2), dtype=np.complex64)),
       "FLAG": (DIMS, np.zeros((2, 1, 2, 2), dtype=bool)),
       "WEIGHT": (DIMS, np.ones((2, 1, 2, 2))),
-      "UVW": (("time", "baseline_id", "uvw_label"), np.zeros((2, 1, 3))),
+      "UVW": (
+        ("time", "baseline_id", "uvw_label"),
+        np.zeros((2, 1, 3)),
+        {"type": "uvw", "units": "m", "frame": "fk5"},
+      ),
     }
     if extra:
       variables["CORRECTED"] = (DIMS, np.ones((2, 1, 2, 2), dtype=np.complex64))
       groups["corrected"] = {"correlated_data": "CORRECTED"}
     datasets[path] = xr.Dataset(
       variables,
-      coords=COORDS,
+      coords={
+        **COORDS,
+        "time": (
+          "time",
+          [1, 2],
+          {"type": "time", "units": "s", "format": "unix", "scale": "utc"},
+        ),
+        "frequency": (
+          "frequency",
+          [10, 20],
+          {"type": "spectral_coord", "units": "Hz", "observer": "TOPO"},
+        ),
+      },
       attrs={
         "type": "visibility",
         "data_groups": groups,
@@ -71,6 +91,11 @@ def test_single_partition_is_pure_and_immutable(tmp_path):
   assert plan.partitions[0].field_and_source == "/part/field_and_source_base_xds"
   assert plan.partitions[0].antenna == "/part/antenna_xds"
   assert plan.partitions[0].correlated_data == "VISIBILITY"
+  assert [(m.column, m.frame) for m in plan.partitions[0].measures] == [
+    ("MAIN::TIME", "UTC"),
+    ("SPECTRAL_WINDOW::CHAN_FREQ", "TOPO"),
+    ("MAIN::UVW", "J2000"),
+  ]
   assert not target.exists()
   with pytest.raises(FrozenInstanceError):
     plan.target = "elsewhere"
@@ -85,6 +110,45 @@ def test_processing_set_shaped_tree_has_deterministic_partition_order(tmp_path):
     "/processing_set/a/part",
     "/processing_set/b/part",
   )
+
+
+def test_cross_partition_reference_conflict_requires_column(tmp_path):
+  tree = make_tree(("/one", "/two"))
+  tree["two"].ds["UVW"].attrs["frame"] = "icrs"
+  with pytest.raises(
+    MeasureReferenceColumnRequired, match=r"/one.*UVW.*/two.*UVW.*reference column"
+  ):
+    plan_fresh_msv2(tree, tmp_path / "fresh.ms")
+  assert not (tmp_path / "fresh.ms").exists()
+
+
+def test_optional_metadata_measures_are_encoded(tmp_path):
+  tree = make_tree()
+  tree["part/antenna_xds"].ds = xr.Dataset(
+    {
+      "ANTENNA_POSITION": (
+        ("antenna", "cartesian"),
+        np.zeros((1, 3)),
+        {"type": "location", "units": "m", "frame": "ITRS"},
+      )
+    },
+    attrs={"type": "antenna"},
+  )
+  tree["part/field_and_source_base_xds"].ds = xr.Dataset(
+    {
+      "FIELD_PHASE_CENTER_DIRECTION": (
+        ("field", "sky"),
+        np.zeros((1, 2)),
+        {"type": "sky_coord", "units": "rad", "frame": "icrs"},
+      )
+    },
+    attrs={"type": "field_and_source"},
+  )
+  measures = plan_fresh_msv2(tree, tmp_path / "fresh.ms").partitions[0].measures
+  assert [(m.column, m.frame) for m in measures[-2:]] == [
+    ("ANTENNA::POSITION", "ITRF"),
+    ("FIELD::PHASE_DIR", "ICRS"),
+  ]
 
 
 def test_field_reference_root_relative_and_absolute(tmp_path):
@@ -351,6 +415,27 @@ def test_lazy_visibility_payloads_are_not_computed(tmp_path):
     tree, tmp_path / "new.ms", additional_visibility={"corrected": "MODEL_DATA"}
   )
   assert plan.partitions[0].additional_correlated_data == (("corrected", "CORRECTED"),)
+
+
+def test_lazy_measure_payload_is_not_computed(tmp_path):
+  import dask.array as da
+  from dask import delayed
+
+  @delayed
+  def fail_on_compute():
+    raise AssertionError("planner computed UVW measure data")
+
+  tree = make_tree()
+  ds = tree["part"].to_dataset()
+  attrs = dict(ds.UVW.attrs)
+  ds["UVW"] = (
+    ("time", "baseline_id", "uvw_label"),
+    da.from_delayed(fail_on_compute(), shape=(2, 1, 3), dtype=np.float64),
+    attrs,
+  )
+  tree["part"].ds = ds
+  plan = plan_fresh_msv2(tree, tmp_path / "fresh.ms")
+  assert plan.partitions[0].measures[2].frame == "J2000"
 
 
 def test_plan_method_survives_legacy_writer_import_failure():

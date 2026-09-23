@@ -8,6 +8,11 @@ from dataclasses import dataclass
 import numpy as np
 from xarray import DataTree
 
+from xarray_ms.backend.msv2.measure_encoding import (
+  FixedMeasureEncoding,
+  check_shared_reference,
+  encode_fixed_measure,
+)
 from xarray_ms.errors import (
   FreshMSv2TargetError,
   FreshMSv2ValidationError,
@@ -68,6 +73,7 @@ class FreshMSv2Partition:
   field_and_source: str
   antenna: str
   additional_correlated_data: tuple[tuple[str, str], ...]
+  measures: tuple[FixedMeasureEncoding, ...]
 
 
 @dataclass(frozen=True)
@@ -200,6 +206,7 @@ def plan_fresh_msv2(
     raise FreshMSv2ValidationError("No correlated datasets found in DataTree")
 
   partitions = []
+  shared_measures: dict[str, FixedMeasureEncoding] = {}
   for node in nodes:
     ds = node.to_dataset(inherit=True)
     for dim in CANONICAL_DIMS:
@@ -274,6 +281,31 @@ def plan_fresh_msv2(
         "and float32 or float64 dtype"
       )
     field = _field_path(tree, node, selected_group["field_and_source"])
+    measures = [
+      encode_fixed_measure(ds["time"].variable, node.path, "time", "MAIN::TIME"),
+      encode_fixed_measure(
+        ds["frequency"].variable, node.path, "frequency", "SPECTRAL_WINDOW::CHAN_FREQ"
+      ),
+      encode_fixed_measure(uvw.variable, node.path, selected_group["uvw"], "MAIN::UVW"),
+    ]
+    for metadata_node, variable_name, column in (
+      (antenna_node, "ANTENNA_POSITION", "ANTENNA::POSITION"),
+      (tree.root[field], "FIELD_PHASE_CENTER_DIRECTION", "FIELD::PHASE_DIR"),
+    ):
+      if variable_name in metadata_node.data_vars:
+        measures.append(
+          encode_fixed_measure(
+            metadata_node.data_vars[variable_name].variable,
+            metadata_node.path,
+            variable_name,
+            column,
+          )
+        )
+    for measure in measures:
+      if previous := shared_measures.get(measure.column):
+        check_shared_reference(previous, measure)
+      else:
+        shared_measures[measure.column] = measure
     additional = []
     for name, _ in mappings:
       extra_group = _group(node, name, ("correlated_data",))
@@ -298,6 +330,7 @@ def plan_fresh_msv2(
         field,
         antenna_node.path,
         tuple(additional),
+        tuple(measures),
       )
     )
   return FreshMSv2Plan(

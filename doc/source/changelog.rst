@@ -5,6 +5,8 @@ Changelog
 
 Unreleased
 ----------
+* Validate fixed MSv4 measure references during fresh-MS v2 preflight and carry
+  immutable CASA column keywords in the plan for metadata creation.
 * Add pure fresh-MS v2 preflight planning via ``plan_fresh_msv2`` and
   ``DataTree.plan_msv2``. Planning validates visibility data groups and
   destination columns without creating or writing a Measurement Set.
