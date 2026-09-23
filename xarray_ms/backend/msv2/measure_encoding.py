@@ -20,9 +20,7 @@ from xarray_ms.errors import MeasureEncodingError, MeasureReferenceColumnRequire
 # These are the reader's mappings, inverted only after validating exact metadata.
 _SUPPORTED = {
   "time": ("epoch", "s", "scale", EpochCoder.MSV2_TO_MSV4_FRAME),
-  "spectral_coord": (
-    "frequency", "Hz", "observer", FrequencyCoder.MSV2_TO_MSV4_FRAME
-  ),
+  "spectral_coord": ("frequency", "Hz", "observer", FrequencyCoder.MSV2_TO_MSV4_FRAME),
   "sky_coord": ("direction", "rad", "frame", DirectionCoder.MSV2_TO_MSV4_FRAME),
   "location": ("position", "m", "frame", PositionCoder.MSV2_TO_MSV4_FRAME),
   "uvw": ("uvw", "m", "frame", UvwCoder.MSV2_TO_MSV4_FRAME),
@@ -43,10 +41,12 @@ class FixedMeasureEncoding:
   @property
   def keywords(self) -> Mapping[str, Any]:
     """Immutable CASA column keywords; freshly materialized for each caller."""
-    return MappingProxyType({
-      "MEASINFO": MappingProxyType({"type": self.msv2_type, "Ref": self.frame}),
-      "QuantumUnits": (self.unit,),
-    })
+    return MappingProxyType(
+      {
+        "MEASINFO": MappingProxyType({"type": self.msv2_type, "Ref": self.frame}),
+        "QuantumUnits": (self.unit,),
+      }
+    )
 
   def to_column_keywords(self) -> dict[str, Any]:
     """Fresh, plain CASA descriptor keywords for a table-creation caller."""
@@ -90,7 +90,9 @@ def check_shared_reference(
 ) -> None:
   """One MSv2 column descriptor cannot express two fixed references."""
   if (previous.msv2_type, previous.frame, previous.unit) != (
-    current.msv2_type, current.frame, current.unit
+    current.msv2_type,
+    current.frame,
+    current.unit,
   ):
     raise MeasureReferenceColumnRequired(
       f"{previous.path} variable {previous.variable!r} and "
