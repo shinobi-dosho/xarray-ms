@@ -1,6 +1,6 @@
-from dataclasses import FrozenInstanceError
 import subprocess
 import sys
+from dataclasses import FrozenInstanceError
 
 import numpy as np
 import pytest
@@ -11,7 +11,9 @@ from xarray_ms.errors import FreshMSv2TargetError, FreshMSv2ValidationError
 
 DIMS = ("time", "baseline_id", "frequency", "polarization")
 COORDS = {
-  "time": [1, 2], "baseline_id": [0], "frequency": [10, 20],
+  "time": [1, 2],
+  "baseline_id": [0],
+  "frequency": [10, 20],
   "polarization": [0, 1],
   "uvw_label": ["u", "v", "w"],
   "baseline_antenna1_name": ("baseline_id", ["A"]),
@@ -26,8 +28,11 @@ def make_tree(paths=("/part",), extra=False):
   for path in paths:
     groups = {
       "base": {
-        "correlated_data": "VISIBILITY", "flag": "FLAG", "weight": "WEIGHT",
-        "uvw": "UVW", "field_and_source": "field_and_source_base_xds",
+        "correlated_data": "VISIBILITY",
+        "flag": "FLAG",
+        "weight": "WEIGHT",
+        "uvw": "UVW",
+        "field_and_source": "field_and_source_base_xds",
       }
     }
     variables = {
@@ -40,10 +45,13 @@ def make_tree(paths=("/part",), extra=False):
       variables["CORRECTED"] = (DIMS, np.ones((2, 1, 2, 2), dtype=np.complex64))
       groups["corrected"] = {"correlated_data": "CORRECTED"}
     datasets[path] = xr.Dataset(
-      variables, coords=COORDS,
+      variables,
+      coords=COORDS,
       attrs={
-        "type": "visibility", "data_groups": groups,
-        "observation_info": {}, "processor_info": {},
+        "type": "visibility",
+        "data_groups": groups,
+        "observation_info": {},
+        "processor_info": {},
       },
     )
     datasets[f"{path}/field_and_source_base_xds"] = xr.Dataset(
@@ -74,7 +82,8 @@ def test_processing_set_shaped_tree_has_deterministic_partition_order(tmp_path):
   tree = make_tree(("/processing_set/b/part", "/processing_set/a/part"))
   plan = plan_fresh_msv2(tree, tmp_path / "new.ms")
   assert tuple(p.path for p in plan.partitions) == (
-    "/processing_set/a/part", "/processing_set/b/part"
+    "/processing_set/a/part",
+    "/processing_set/b/part",
   )
 
 
@@ -132,7 +141,12 @@ def test_canonical_coordinates_dimensions_and_dtype(tmp_path):
   tree["part"].ds = tree["part"].ds.drop_vars("frequency")
   with pytest.raises(FreshMSv2ValidationError, match="coordinate 'frequency'"):
     plan_fresh_msv2(tree, target)
-  for coord in ("baseline_antenna1_name", "baseline_antenna2_name", "field_name", "scan_name"):
+  for coord in (
+    "baseline_antenna1_name",
+    "baseline_antenna2_name",
+    "field_name",
+    "scan_name",
+  ):
     tree = make_tree()
     tree["part"].ds = tree["part"].ds.drop_vars(coord)
     with pytest.raises(FreshMSv2ValidationError, match=coord):
@@ -145,9 +159,13 @@ def test_canonical_coordinates_dimensions_and_dtype(tmp_path):
     plan_fresh_msv2(tree, target)
   tree = make_tree()
   ds = tree["part"].to_dataset()
-  ds["VISIBILITY"] = ds.VISIBILITY.transpose("frequency", "time", "baseline_id", "polarization")
+  ds["VISIBILITY"] = ds.VISIBILITY.transpose(
+    "frequency", "time", "baseline_id", "polarization"
+  )
   tree["part"].ds = ds
-  with pytest.raises(FreshMSv2ValidationError, match="base visibility requires dimensions"):
+  with pytest.raises(
+    FreshMSv2ValidationError, match="base visibility requires dimensions"
+  ):
     plan_fresh_msv2(tree, target)
   tree = make_tree()
   ds = tree["part"].to_dataset()
@@ -160,7 +178,9 @@ def test_canonical_coordinates_dimensions_and_dtype(tmp_path):
 def test_additional_visibility_and_mapping_validation(tmp_path):
   target = tmp_path / "new.ms"
   tree = make_tree(extra=True)
-  plan = plan_fresh_msv2(tree, target, additional_visibility={"corrected": "corrected_data"})
+  plan = plan_fresh_msv2(
+    tree, target, additional_visibility={"corrected": "corrected_data"}
+  )
   assert plan.visibility_mappings == (("base", "DATA"), ("corrected", "corrected_data"))
   assert plan.partitions[0].additional_correlated_data == (("corrected", "CORRECTED"),)
   for mappings, message in (
@@ -187,7 +207,8 @@ def test_additional_destination_collision(tmp_path):
   }
   with pytest.raises(FreshMSv2ValidationError, match="duplicated"):
     plan_fresh_msv2(
-      tree, tmp_path / "new.ms",
+      tree,
+      tmp_path / "new.ms",
       additional_visibility={"corrected": "MODEL_DATA", "other": "model_data"},
     )
 
@@ -234,9 +255,17 @@ def test_required_metadata_nodes_and_field_type(tmp_path):
   ("role", "replacement"),
   [
     ("FLAG", lambda ds: ds.FLAG.astype("int8")),
-    ("FLAG", lambda ds: ds.FLAG.transpose("frequency", "time", "baseline_id", "polarization")),
+    (
+      "FLAG",
+      lambda ds: ds.FLAG.transpose("frequency", "time", "baseline_id", "polarization"),
+    ),
     ("WEIGHT", lambda ds: ds.WEIGHT.astype("int64")),
-    ("WEIGHT", lambda ds: ds.WEIGHT.transpose("frequency", "time", "baseline_id", "polarization")),
+    (
+      "WEIGHT",
+      lambda ds: ds.WEIGHT.transpose(
+        "frequency", "time", "baseline_id", "polarization"
+      ),
+    ),
     ("UVW", lambda ds: ds.UVW.astype("complex64")),
     ("UVW", lambda ds: ds.UVW.transpose("uvw_label", "time", "baseline_id")),
   ],
@@ -280,7 +309,10 @@ def test_base_role_supported_dtypes(tmp_path, role, dtype, accepted):
   if accepted:
     assert plan_fresh_msv2(tree, tmp_path / "new.ms").partitions[0].path == "/part"
   else:
-    with pytest.raises(FreshMSv2ValidationError, match=role if role != "VISIBILITY" else "base visibility"):
+    with pytest.raises(
+      FreshMSv2ValidationError,
+      match=role if role != "VISIBILITY" else "base visibility",
+    ):
       plan_fresh_msv2(tree, tmp_path / "new.ms")
 
 
@@ -336,5 +368,7 @@ assert not xarray_ms.HAS_WRITE_SUPPORT
 assert callable(DataTree.plan_msv2)
 assert callable(xarray_ms.plan_fresh_msv2)
 """
-  result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+  result = subprocess.run(
+    [sys.executable, "-c", script], capture_output=True, text=True
+  )
   assert result.returncode == 0, result.stderr

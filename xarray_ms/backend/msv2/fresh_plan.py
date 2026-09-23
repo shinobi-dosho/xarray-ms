@@ -24,12 +24,34 @@ STRUCTURAL_COORDS = {
 SEMANTIC_ROLES = ("correlated_data", "flag", "weight", "uvw", "field_and_source")
 RESERVED_COLUMNS = frozenset(
   {
-    "DATA", "FLAG", "FLAG_ROW", "WEIGHT", "WEIGHT_SPECTRUM", "UVW",
-    "TIME", "TIME_CENTROID", "INTERVAL", "EXPOSURE", "ANTENNA1",
-    "ANTENNA2", "DATA_DESC_ID", "FIELD_ID", "OBSERVATION_ID",
-    "PROCESSOR_ID", "STATE_ID", "SCAN_NUMBER", "FEED1", "FEED2",
-    "ARRAY_ID", "FLAG_CATEGORY", "SIGMA", "SIGMA_SPECTRUM", "SOURCE_ID",
-    "SUB_SCAN_NUMBER", "PHASE_ID", "PULSAR_BIN",
+    "DATA",
+    "FLAG",
+    "FLAG_ROW",
+    "WEIGHT",
+    "WEIGHT_SPECTRUM",
+    "UVW",
+    "TIME",
+    "TIME_CENTROID",
+    "INTERVAL",
+    "EXPOSURE",
+    "ANTENNA1",
+    "ANTENNA2",
+    "DATA_DESC_ID",
+    "FIELD_ID",
+    "OBSERVATION_ID",
+    "PROCESSOR_ID",
+    "STATE_ID",
+    "SCAN_NUMBER",
+    "FEED1",
+    "FEED2",
+    "ARRAY_ID",
+    "FLAG_CATEGORY",
+    "SIGMA",
+    "SIGMA_SPECTRUM",
+    "SOURCE_ID",
+    "SUB_SCAN_NUMBER",
+    "PHASE_ID",
+    "PULSAR_BIN",
   }
 )
 
@@ -70,9 +92,7 @@ def _target_path(target: str | os.PathLike[str]) -> str:
     raise FreshMSv2TargetError(f"Target already exists: {path}")
   parent = os.path.dirname(path)
   if not os.path.isdir(parent):
-    raise FreshMSv2TargetError(
-      f"Target parent is missing or not a directory: {parent}"
-    )
+    raise FreshMSv2TargetError(f"Target parent is missing or not a directory: {parent}")
   return path
 
 
@@ -147,7 +167,9 @@ def plan_fresh_msv2(
     raise FreshMSv2ValidationError("Source must be an xarray DataTree")
   if not isinstance(data_group, str) or not data_group:
     raise FreshMSv2ValidationError("data_group must be a nonempty name")
-  if additional_visibility is not None and not isinstance(additional_visibility, Mapping):
+  if additional_visibility is not None and not isinstance(
+    additional_visibility, Mapping
+  ):
     raise FreshMSv2ValidationError("additional_visibility must be a mapping")
 
   supplied_mappings = additional_visibility or {}
@@ -158,7 +180,9 @@ def plan_fresh_msv2(
   for group, column in sorted(supplied_mappings.items()):
     if not isinstance(group, str) or not group or group == data_group:
       raise FreshMSv2ValidationError(f"Invalid additional data group {group!r}")
-    if not isinstance(column, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", column):
+    if not isinstance(column, str) or not re.fullmatch(
+      r"[A-Za-z][A-Za-z0-9_]*", column
+    ):
       raise FreshMSv2ValidationError(f"Invalid destination column {column!r}")
     folded_column = column.upper()
     if folded_column in destinations or folded_column in RESERVED_COLUMNS:
@@ -210,7 +234,8 @@ def plan_fresh_msv2(
     selected_group = _group(node, data_group, SEMANTIC_ROLES)
     base = _variable(node, selected_group, "correlated_data", data_group)
     if base.dims != CANONICAL_DIMS or base.dtype not in (
-      np.dtype("complex64"), np.dtype("complex128")
+      np.dtype("complex64"),
+      np.dtype("complex128"),
     ):
       raise FreshMSv2ValidationError(
         f"Partition {node.path}: base visibility requires dimensions "
@@ -218,16 +243,20 @@ def plan_fresh_msv2(
         f"got {base.dims}, {base.dtype}"
       )
     flag = _variable(node, selected_group, "flag", data_group)
-    if flag.dims != base.dims or flag.shape != base.shape or flag.dtype not in (
-      np.dtype("bool"), np.dtype("uint8")
+    if (
+      flag.dims != base.dims
+      or flag.shape != base.shape
+      or flag.dtype not in (np.dtype("bool"), np.dtype("uint8"))
     ):
       raise FreshMSv2ValidationError(
         f"Partition {node.path}: FLAG requires base visibility dimensions/shape "
         "and bool or uint8 dtype"
       )
     weight = _variable(node, selected_group, "weight", data_group)
-    if weight.dims != base.dims or weight.shape != base.shape or weight.dtype not in (
-      np.dtype("float32"), np.dtype("float64")
+    if (
+      weight.dims != base.dims
+      or weight.shape != base.shape
+      or weight.dtype not in (np.dtype("float32"), np.dtype("float64"))
     ):
       raise FreshMSv2ValidationError(
         f"Partition {node.path}: WEIGHT requires base visibility dimensions/shape "
@@ -249,7 +278,11 @@ def plan_fresh_msv2(
     for name, _ in mappings:
       extra_group = _group(node, name, ("correlated_data",))
       extra = _variable(node, extra_group, "correlated_data", name)
-      if extra.dims != base.dims or extra.shape != base.shape or extra.dtype != base.dtype:
+      if (
+        extra.dims != base.dims
+        or extra.shape != base.shape
+        or extra.dtype != base.dtype
+      ):
         raise FreshMSv2ValidationError(
           f"Partition {node.path}: group {name!r} visibility dimensions, "
           "shape and dtype must match the base visibility"
@@ -257,13 +290,19 @@ def plan_fresh_msv2(
       additional.append((name, extra_group["correlated_data"]))
     partitions.append(
       FreshMSv2Partition(
-        node.path, selected_group["correlated_data"], selected_group["flag"],
-        selected_group["weight"], selected_group["uvw"], field,
-        antenna_node.path, tuple(additional)
+        node.path,
+        selected_group["correlated_data"],
+        selected_group["flag"],
+        selected_group["weight"],
+        selected_group["uvw"],
+        field,
+        antenna_node.path,
+        tuple(additional),
       )
     )
-  return FreshMSv2Plan(destination, data_group, tuple(partitions),
-                       ((data_group, "DATA"), *mappings))
+  return FreshMSv2Plan(
+    destination, data_group, tuple(partitions), ((data_group, "DATA"), *mappings)
+  )
 
 
 def datatree_plan_msv2(
