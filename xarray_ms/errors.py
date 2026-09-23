@@ -97,3 +97,11 @@ class FreshMSv2TargetError(FreshMSv2PlanError):
 
 class FreshMSv2ValidationError(FreshMSv2PlanError):
   """The source tree or a visibility mapping is invalid."""
+
+
+class MeasureEncodingError(FreshMSv2ValidationError):
+  """A fixed MSv4 measure cannot be represented in MSv2."""
+
+
+class MeasureReferenceColumnRequired(MeasureEncodingError):
+  """The measure needs an MSv2 per-row reference column."""
