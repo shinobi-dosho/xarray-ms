@@ -47,6 +47,8 @@ RESERVED_COLUMNS = frozenset(
     "EXPOSURE",
     "ANTENNA1",
     "ANTENNA2",
+    "ANTENNA3",
+    "BASELINE_REF",
     "DATA_DESC_ID",
     "FIELD_ID",
     "OBSERVATION_ID",
@@ -57,12 +59,21 @@ RESERVED_COLUMNS = frozenset(
     "FEED2",
     "ARRAY_ID",
     "FLAG_CATEGORY",
+    "CORRECTED_WEIGHT_SPECTRUM",
+    "FLOAT_DATA",
+    "IMAGING_WEIGHT",
+    "LAG_DATA",
     "SIGMA",
     "SIGMA_SPECTRUM",
     "SOURCE_ID",
     "SUB_SCAN_NUMBER",
     "PHASE_ID",
     "PULSAR_BIN",
+    "PULSAR_GATE_ID",
+    "FEED3",
+    "TIME_EXTRA_PREC",
+    "UVW2",
+    "VIDEO_POINT",
   }
 )
 UNSUPPORTED_OPTIONAL_METADATA = frozenset(
@@ -102,6 +113,7 @@ class FreshMSv2Plan:
   data_group: str
   partitions: tuple[FreshMSv2Partition, ...]
   visibility_mappings: tuple[tuple[str, str], ...]
+  visibility_columns: tuple[tuple[str, str, tuple[tuple[int, int], ...]], ...]
   metadata: MetadataRows
 
 
@@ -226,6 +238,12 @@ def plan_fresh_msv2(
 
   partitions = []
   extracted = []
+  visibility_shapes: dict[str, set[tuple[int, int]]] = {
+    column: set() for _, column in ((data_group, "DATA"), *mappings)
+  }
+  visibility_dtypes: dict[str, set[str]] = {
+    column: set() for column in visibility_shapes
+  }
   shared_measures: dict[str, FixedMeasureEncoding] = {}
   for node in nodes:
     ds = node.to_dataset(inherit=True)
@@ -280,6 +298,8 @@ def plan_fresh_msv2(
         f"{CANONICAL_DIMS} and complex64 or complex128 dtype; "
         f"got {base.dims}, {base.dtype}"
       )
+    visibility_shapes["DATA"].add(base.shape[2:])
+    visibility_dtypes["DATA"].add(base.dtype.str)
     flag = _variable(node, selected_group, "flag", data_group)
     if (
       flag.dims != base.dims
@@ -366,7 +386,7 @@ def plan_fresh_msv2(
       )
     )
     additional = []
-    for name, _ in mappings:
+    for name, column in mappings:
       extra_group = _group(node, name, ("correlated_data",))
       extra = _variable(node, extra_group, "correlated_data", name)
       if (
@@ -379,6 +399,8 @@ def plan_fresh_msv2(
           "shape and dtype must match the base visibility"
         )
       additional.append((name, extra_group["correlated_data"]))
+      visibility_shapes[column].add(extra.shape[2:])
+      visibility_dtypes[column].add(extra.dtype.str)
     partitions.append(
       (
         node.path,
@@ -393,15 +415,34 @@ def plan_fresh_msv2(
       )
     )
   metadata, foreign_keys = build_metadata(extracted)
+  if any(row.focus_length is not None for row in metadata.feed_rows):
+    raise FreshMSv2ValidationError(
+      "ANTENNA_FOCUS_LENGTH requires optional FEED::FOCUS_LENGTH column; "
+      "fresh creation cannot add subtable columns"
+    )
   resolved_partitions = [
     FreshMSv2Partition(*partition, keys)
     for partition, keys in zip(partitions, foreign_keys, strict=True)
   ]
+  for column, dtypes in visibility_dtypes.items():
+    if len(dtypes) != 1:
+      raise FreshMSv2ValidationError(
+        f"Visibility column {column!r} has incompatible partition dtypes "
+        f"{sorted(dtypes)}"
+      )
   return FreshMSv2Plan(
     destination,
     data_group,
     tuple(resolved_partitions),
     ((data_group, "DATA"), *mappings),
+    tuple(
+      (
+        column,
+        next(iter(visibility_dtypes[column])),
+        tuple(sorted(visibility_shapes[column])),
+      )
+      for column in visibility_shapes
+    ),
     metadata,
   )
 

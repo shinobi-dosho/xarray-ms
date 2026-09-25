@@ -5,6 +5,8 @@ Changelog
 
 Unreleased
 ----------
+* Create staged, verified zero-row MSv2 tables from immutable fresh-write plans,
+  including all visibility columns and deterministic required subtable rows.
 * Close and refresh the shared MAIN table after column additions, including
   partial failures, so lazy writes cannot reuse a stale casacore schema.
 * Plan deterministic MSv2 metadata rows and validated MAIN foreign keys from
