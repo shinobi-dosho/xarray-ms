@@ -5,6 +5,8 @@ Changelog
 
 Unreleased
 ----------
+* Close and refresh the shared MAIN table after column additions, including
+  partial failures, so lazy writes cannot reuse a stale casacore schema.
 * Plan deterministic MSv2 metadata rows and validated MAIN foreign keys from
   MSv4 partition metadata without creating tables or reading visibility payloads.
 * Validate fixed MSv4 measure references during fresh-MS v2 preflight and carry
