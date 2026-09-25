@@ -6,11 +6,10 @@ import numpy as np
 import pytest
 from arcae.lib.arrow_tables import Table
 
+from tests.test_fresh_plan import make_tree
 from xarray_ms import create_fresh_msv2, plan_fresh_msv2
 from xarray_ms.backend.msv2 import fresh_create
 from xarray_ms.errors import FreshMSv2TargetError, FreshMSv2ValidationError
-
-from tests.test_fresh_plan import make_tree
 
 
 def test_fresh_skeleton_publishes_columns_metadata_and_keywords(tmp_path):
@@ -80,16 +79,19 @@ def test_ragged_spectral_polarization_and_feed_cells(tmp_path):
     ]
     assert sorted(spw.getcol("NUM_CHAN").tolist()) == [1, 2]
     assert spw.getcol("MEAS_FREQ_REF").tolist() == [5, 5]
-    assert [spw.getcol("CHAN_FREQ", index=(slice(i, i + 1),)).shape[1]
-            for i in range(2)] == spw.getcol("NUM_CHAN").tolist()
+    assert [
+      spw.getcol("CHAN_FREQ", index=(slice(i, i + 1),)).shape[1] for i in range(2)
+    ] == spw.getcol("NUM_CHAN").tolist()
   with Table.from_filename(str(target / "POLARIZATION")) as pol:
     assert sorted(pol.getcol("NUM_CORR").tolist()) == [1, 2]
-    assert [pol.getcol("CORR_TYPE", index=(slice(i, i + 1),)).shape[1]
-            for i in range(2)] == pol.getcol("NUM_CORR").tolist()
+    assert [
+      pol.getcol("CORR_TYPE", index=(slice(i, i + 1),)).shape[1] for i in range(2)
+    ] == pol.getcol("NUM_CORR").tolist()
   with Table.from_filename(str(target / "FEED")) as feed:
     assert sorted(feed.getcol("NUM_RECEPTORS").tolist()) == [1, 1, 2, 2]
-    assert [feed.getcol("POL_RESPONSE", index=(slice(i, i + 1),)).shape[1:]
-            for i in range(4)] == [(n, n) for n in feed.getcol("NUM_RECEPTORS")]
+    assert [
+      feed.getcol("POL_RESPONSE", index=(slice(i, i + 1),)).shape[1:] for i in range(4)
+    ] == [(n, n) for n in feed.getcol("NUM_RECEPTORS")]
   with Table.from_filename(str(target / "DATA_DESCRIPTION")) as dd:
     assert dd.getcol("SPECTRAL_WINDOW_ID").tolist() == [
       row.spectral_window_id for row in plan.metadata.data_description_rows
@@ -181,7 +183,9 @@ def test_target_appearing_during_verification_is_preserved(tmp_path, monkeypatch
   assert not list(tmp_path.glob(".*.staging"))
 
 
-@pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="atomic no-clobber rename")
+@pytest.mark.skipif(
+  sys.platform not in ("linux", "darwin"), reason="atomic no-clobber rename"
+)
 def test_publish_is_atomic_no_clobber(tmp_path):
   staged = tmp_path / "private.staging"
   target = tmp_path / "new.ms"
@@ -210,7 +214,9 @@ def test_optional_focus_length_is_not_silently_dropped(tmp_path):
   antenna = tree["part/antenna_xds"]
   ds = antenna.to_dataset().copy()
   ds["ANTENNA_FOCUS_LENGTH"] = (
-    "antenna_name", [1., 1.], {"type": "quantity", "units": "m"}
+    "antenna_name",
+    [1.0, 1.0],
+    {"type": "quantity", "units": "m"},
   )
   antenna.ds = ds
   with pytest.raises(FreshMSv2ValidationError, match="FEED::FOCUS_LENGTH"):

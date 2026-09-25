@@ -13,12 +13,20 @@ from arcae.lib.arrow_tables import Table, ms_descriptor
 
 from xarray_ms.backend.msv2.fresh_plan import FreshMSv2Plan
 from xarray_ms.backend.msv2.measures_encoders import EpochCoder
-from xarray_ms.casa_types import FrequencyMeasures, NUMPY_TO_CASA_MAP
+from xarray_ms.casa_types import NUMPY_TO_CASA_MAP, FrequencyMeasures
 from xarray_ms.errors import FreshMSv2TargetError
 
 SUBTABLES = (
-  "ANTENNA", "FEED", "FIELD", "SOURCE", "SPECTRAL_WINDOW", "POLARIZATION",
-  "DATA_DESCRIPTION", "OBSERVATION", "PROCESSOR", "STATE",
+  "ANTENNA",
+  "FEED",
+  "FIELD",
+  "SOURCE",
+  "SPECTRAL_WINDOW",
+  "POLARIZATION",
+  "DATA_DESCRIPTION",
+  "OBSERVATION",
+  "PROCESSOR",
+  "STATE",
 )
 ADDROWS_BATCH = 128
 
@@ -31,118 +39,151 @@ def _metadata_columns(plan):
   m = plan.metadata
   source_direction = {
     m.source_rows[r.source_id].name: r.phase_direction
-    for r in reversed(m.field_rows) if r.source_id >= 0
+    for r in reversed(m.field_rows)
+    if r.source_id >= 0
   }
   return {
-    "ANTENNA": (m.antenna_rows, {
-      "NAME": [r.name for r in m.antenna_rows],
-      "STATION": [r.station for r in m.antenna_rows],
-      "MOUNT": [r.mount for r in m.antenna_rows],
-      "POSITION": [r.position for r in m.antenna_rows],
-      "DISH_DIAMETER": [r.dish_diameter for r in m.antenna_rows],
-      "TYPE": ["GROUND-BASED"] * len(m.antenna_rows),
-      "OFFSET": [(0., 0., 0.)] * len(m.antenna_rows),
-      "FLAG_ROW": [False] * len(m.antenna_rows),
-    }),
-    "FEED": (m.feed_rows, {
-      "ANTENNA_ID": [r.antenna_id for r in m.feed_rows],
-      "FEED_ID": [r.feed_id for r in m.feed_rows],
-      "SPECTRAL_WINDOW_ID": [r.spectral_window_id for r in m.feed_rows],
-      "NUM_RECEPTORS": [len(r.polarization_type) for r in m.feed_rows],
-      "POLARIZATION_TYPE": [r.polarization_type for r in m.feed_rows],
-      "RECEPTOR_ANGLE": [r.receptor_angle for r in m.feed_rows],
-      "POSITION": [(0., 0., 0.)] * len(m.feed_rows),
-      "BEAM_OFFSET": [
-        ((0.0,) * len(r.polarization_type),) * 2 for r in m.feed_rows
-      ],
-      "POL_RESPONSE": [
-        np.eye(len(r.polarization_type), dtype=np.complex64) for r in m.feed_rows
-      ],
-      "BEAM_ID": [-1] * len(m.feed_rows),
-      "TIME": [0.] * len(m.feed_rows),
-      "INTERVAL": [0.] * len(m.feed_rows),
-    }),
-    "FIELD": (m.field_rows, {
-      "NAME": [r.name for r in m.field_rows],
-      "SOURCE_ID": [r.source_id for r in m.field_rows],
-      "PHASE_DIR": [[r.phase_direction] for r in m.field_rows],
-      "DELAY_DIR": [[r.phase_direction] for r in m.field_rows],
-      "REFERENCE_DIR": [[r.phase_direction] for r in m.field_rows],
-      "NUM_POLY": [0] * len(m.field_rows),
-      "TIME": [0.] * len(m.field_rows),
-      "CODE": [""] * len(m.field_rows),
-      "FLAG_ROW": [False] * len(m.field_rows),
-    }),
-    "SOURCE": (m.source_rows, {
-      "NAME": [r.name for r in m.source_rows],
-      "SOURCE_ID": list(range(len(m.source_rows))),
-      "DIRECTION": [source_direction[r.name] for r in m.source_rows],
-      "PROPER_MOTION": [(0., 0.)] * len(m.source_rows),
-      "SPECTRAL_WINDOW_ID": [-1] * len(m.source_rows),
-      "NUM_LINES": [0] * len(m.source_rows),
-      "TIME": [0.] * len(m.source_rows),
-      "INTERVAL": [0.] * len(m.source_rows),
-      "CALIBRATION_GROUP": [0] * len(m.source_rows),
-      "CODE": [""] * len(m.source_rows),
-    }),
-    "SPECTRAL_WINDOW": (m.spectral_window_rows, {
-      "NAME": [r.name for r in m.spectral_window_rows],
-      "CHAN_FREQ": [r.channel_frequency for r in m.spectral_window_rows],
-      "CHAN_WIDTH": [r.channel_width for r in m.spectral_window_rows],
-      "EFFECTIVE_BW": [r.effective_channel_width for r in m.spectral_window_rows],
-      "RESOLUTION": [r.resolution for r in m.spectral_window_rows],
-      "REF_FREQUENCY": [r.reference_frequency for r in m.spectral_window_rows],
-      "MEAS_FREQ_REF": [FrequencyMeasures[r.frame].value for r in m.spectral_window_rows],
-      "NUM_CHAN": [len(r.channel_frequency) for r in m.spectral_window_rows],
-      "TOTAL_BANDWIDTH": [
-        sum(abs(v) for v in r.channel_width) for r in m.spectral_window_rows
-      ],
-      "FREQ_GROUP_NAME": [r.frequency_group_name or "" for r in m.spectral_window_rows],
-      "FREQ_GROUP": [0] * len(m.spectral_window_rows),
-      "IF_CONV_CHAIN": [0] * len(m.spectral_window_rows),
-      "NET_SIDEBAND": [1] * len(m.spectral_window_rows),
-      "FLAG_ROW": [False] * len(m.spectral_window_rows),
-    }),
-    "POLARIZATION": (m.polarization_rows, {
-      "CORR_TYPE": [r.corr_type for r in m.polarization_rows],
-      "CORR_PRODUCT": [r.corr_product for r in m.polarization_rows],
-      "NUM_CORR": [len(r.corr_type) for r in m.polarization_rows],
-      "FLAG_ROW": [False] * len(m.polarization_rows),
-    }),
-    "DATA_DESCRIPTION": (m.data_description_rows, {
-      "SPECTRAL_WINDOW_ID": [r.spectral_window_id for r in m.data_description_rows],
-      "POLARIZATION_ID": [r.polarization_id for r in m.data_description_rows],
-      "FLAG_ROW": [False] * len(m.data_description_rows),
-    }),
-    "OBSERVATION": (m.observation_rows, {
-      "OBSERVER": [r.observer for r in m.observation_rows],
-      "PROJECT": [r.project_uid for r in m.observation_rows],
-      "RELEASE_DATE": [
-        datetime.fromisoformat(r.release_date).timestamp()
-        + EpochCoder.MJD_OFFSET_SECONDS
-        for r in m.observation_rows
-      ],
-      "TELESCOPE_NAME": [r.telescope for r in m.observation_rows],
-      "TIME_RANGE": [(0., 0.)] * len(m.observation_rows),
-      "SCHEDULE_TYPE": [""] * len(m.observation_rows),
-      "FLAG_ROW": [False] * len(m.observation_rows),
-    }),
-    "PROCESSOR": (m.processor_rows, {
-      "TYPE": [r.type for r in m.processor_rows],
-      "SUB_TYPE": [r.sub_type for r in m.processor_rows],
-      "TYPE_ID": [-1] * len(m.processor_rows),
-      "MODE_ID": [-1] * len(m.processor_rows),
-      "FLAG_ROW": [False] * len(m.processor_rows),
-    }),
-    "STATE": (m.state_rows, {
-      "OBS_MODE": [",".join(r.scan_intents) for r in m.state_rows],
-      "SIG": [True] * len(m.state_rows),
-      "REF": [False] * len(m.state_rows),
-      "CAL": [0.] * len(m.state_rows),
-      "LOAD": [0.] * len(m.state_rows),
-      "SUB_SCAN": [0] * len(m.state_rows),
-      "FLAG_ROW": [False] * len(m.state_rows),
-    }),
+    "ANTENNA": (
+      m.antenna_rows,
+      {
+        "NAME": [r.name for r in m.antenna_rows],
+        "STATION": [r.station for r in m.antenna_rows],
+        "MOUNT": [r.mount for r in m.antenna_rows],
+        "POSITION": [r.position for r in m.antenna_rows],
+        "DISH_DIAMETER": [r.dish_diameter for r in m.antenna_rows],
+        "TYPE": ["GROUND-BASED"] * len(m.antenna_rows),
+        "OFFSET": [(0.0, 0.0, 0.0)] * len(m.antenna_rows),
+        "FLAG_ROW": [False] * len(m.antenna_rows),
+      },
+    ),
+    "FEED": (
+      m.feed_rows,
+      {
+        "ANTENNA_ID": [r.antenna_id for r in m.feed_rows],
+        "FEED_ID": [r.feed_id for r in m.feed_rows],
+        "SPECTRAL_WINDOW_ID": [r.spectral_window_id for r in m.feed_rows],
+        "NUM_RECEPTORS": [len(r.polarization_type) for r in m.feed_rows],
+        "POLARIZATION_TYPE": [r.polarization_type for r in m.feed_rows],
+        "RECEPTOR_ANGLE": [r.receptor_angle for r in m.feed_rows],
+        "POSITION": [(0.0, 0.0, 0.0)] * len(m.feed_rows),
+        "BEAM_OFFSET": [((0.0,) * len(r.polarization_type),) * 2 for r in m.feed_rows],
+        "POL_RESPONSE": [
+          np.eye(len(r.polarization_type), dtype=np.complex64) for r in m.feed_rows
+        ],
+        "BEAM_ID": [-1] * len(m.feed_rows),
+        "TIME": [0.0] * len(m.feed_rows),
+        "INTERVAL": [0.0] * len(m.feed_rows),
+      },
+    ),
+    "FIELD": (
+      m.field_rows,
+      {
+        "NAME": [r.name for r in m.field_rows],
+        "SOURCE_ID": [r.source_id for r in m.field_rows],
+        "PHASE_DIR": [[r.phase_direction] for r in m.field_rows],
+        "DELAY_DIR": [[r.phase_direction] for r in m.field_rows],
+        "REFERENCE_DIR": [[r.phase_direction] for r in m.field_rows],
+        "NUM_POLY": [0] * len(m.field_rows),
+        "TIME": [0.0] * len(m.field_rows),
+        "CODE": [""] * len(m.field_rows),
+        "FLAG_ROW": [False] * len(m.field_rows),
+      },
+    ),
+    "SOURCE": (
+      m.source_rows,
+      {
+        "NAME": [r.name for r in m.source_rows],
+        "SOURCE_ID": list(range(len(m.source_rows))),
+        "DIRECTION": [source_direction[r.name] for r in m.source_rows],
+        "PROPER_MOTION": [(0.0, 0.0)] * len(m.source_rows),
+        "SPECTRAL_WINDOW_ID": [-1] * len(m.source_rows),
+        "NUM_LINES": [0] * len(m.source_rows),
+        "TIME": [0.0] * len(m.source_rows),
+        "INTERVAL": [0.0] * len(m.source_rows),
+        "CALIBRATION_GROUP": [0] * len(m.source_rows),
+        "CODE": [""] * len(m.source_rows),
+      },
+    ),
+    "SPECTRAL_WINDOW": (
+      m.spectral_window_rows,
+      {
+        "NAME": [r.name for r in m.spectral_window_rows],
+        "CHAN_FREQ": [r.channel_frequency for r in m.spectral_window_rows],
+        "CHAN_WIDTH": [r.channel_width for r in m.spectral_window_rows],
+        "EFFECTIVE_BW": [r.effective_channel_width for r in m.spectral_window_rows],
+        "RESOLUTION": [r.resolution for r in m.spectral_window_rows],
+        "REF_FREQUENCY": [r.reference_frequency for r in m.spectral_window_rows],
+        "MEAS_FREQ_REF": [
+          FrequencyMeasures[r.frame].value for r in m.spectral_window_rows
+        ],
+        "NUM_CHAN": [len(r.channel_frequency) for r in m.spectral_window_rows],
+        "TOTAL_BANDWIDTH": [
+          sum(abs(v) for v in r.channel_width) for r in m.spectral_window_rows
+        ],
+        "FREQ_GROUP_NAME": [
+          r.frequency_group_name or "" for r in m.spectral_window_rows
+        ],
+        "FREQ_GROUP": [0] * len(m.spectral_window_rows),
+        "IF_CONV_CHAIN": [0] * len(m.spectral_window_rows),
+        "NET_SIDEBAND": [1] * len(m.spectral_window_rows),
+        "FLAG_ROW": [False] * len(m.spectral_window_rows),
+      },
+    ),
+    "POLARIZATION": (
+      m.polarization_rows,
+      {
+        "CORR_TYPE": [r.corr_type for r in m.polarization_rows],
+        "CORR_PRODUCT": [r.corr_product for r in m.polarization_rows],
+        "NUM_CORR": [len(r.corr_type) for r in m.polarization_rows],
+        "FLAG_ROW": [False] * len(m.polarization_rows),
+      },
+    ),
+    "DATA_DESCRIPTION": (
+      m.data_description_rows,
+      {
+        "SPECTRAL_WINDOW_ID": [r.spectral_window_id for r in m.data_description_rows],
+        "POLARIZATION_ID": [r.polarization_id for r in m.data_description_rows],
+        "FLAG_ROW": [False] * len(m.data_description_rows),
+      },
+    ),
+    "OBSERVATION": (
+      m.observation_rows,
+      {
+        "OBSERVER": [r.observer for r in m.observation_rows],
+        "PROJECT": [r.project_uid for r in m.observation_rows],
+        "RELEASE_DATE": [
+          datetime.fromisoformat(r.release_date).timestamp()
+          + EpochCoder.MJD_OFFSET_SECONDS
+          for r in m.observation_rows
+        ],
+        "TELESCOPE_NAME": [r.telescope for r in m.observation_rows],
+        "TIME_RANGE": [(0.0, 0.0)] * len(m.observation_rows),
+        "SCHEDULE_TYPE": [""] * len(m.observation_rows),
+        "FLAG_ROW": [False] * len(m.observation_rows),
+      },
+    ),
+    "PROCESSOR": (
+      m.processor_rows,
+      {
+        "TYPE": [r.type for r in m.processor_rows],
+        "SUB_TYPE": [r.sub_type for r in m.processor_rows],
+        "TYPE_ID": [-1] * len(m.processor_rows),
+        "MODE_ID": [-1] * len(m.processor_rows),
+        "FLAG_ROW": [False] * len(m.processor_rows),
+      },
+    ),
+    "STATE": (
+      m.state_rows,
+      {
+        "OBS_MODE": [",".join(r.scan_intents) for r in m.state_rows],
+        "SIG": [True] * len(m.state_rows),
+        "REF": [False] * len(m.state_rows),
+        "CAL": [0.0] * len(m.state_rows),
+        "LOAD": [0.0] * len(m.state_rows),
+        "SUB_SCAN": [0] * len(m.state_rows),
+        "FLAG_ROW": [False] * len(m.state_rows),
+      },
+    ),
   }
 
 
@@ -173,8 +214,11 @@ def _create(plan, staging):
       # spurious NonCanonicalColumnWarning from the legacy descriptor helper.
       canonical_desc = {**canonical_desc, "valueType": "BOOL"}
     desc[column] = synthesise_column_desc(
-      column, column, DataVariableInfo(0, set(shapes), {np.dtype(dtype)}),
-      canonical_desc, managers,
+      column,
+      column,
+      DataVariableInfo(0, set(shapes), {np.dtype(dtype)}),
+      canonical_desc,
+      managers,
     )
     if column == "FLAG":
       desc[column]["valueType"] = canonical["FLAG"]["valueType"]
@@ -205,7 +249,9 @@ def _create(plan, staging):
         for column, values in columns.items():
           if _ragged(values):
             for row, value in enumerate(values):
-              table.putcol(column, np.asarray(value)[None, ...], index=(slice(row, row + 1),))
+              table.putcol(
+                column, np.asarray(value)[None, ...], index=(slice(row, row + 1),)
+              )
           else:
             table.putcol(column, np.asarray(values))
 
@@ -318,4 +364,6 @@ def _publish_no_replace(staging: str, target: str) -> None:
   elif sys.platform == "win32":
     os.rename(staging, target)
   else:
-    raise NotImplementedError(f"Atomic no-replace publish unsupported on {sys.platform}")
+    raise NotImplementedError(
+      f"Atomic no-replace publish unsupported on {sys.platform}"
+    )
