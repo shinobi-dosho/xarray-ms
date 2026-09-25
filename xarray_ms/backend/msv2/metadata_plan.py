@@ -527,6 +527,17 @@ def build_metadata(
     SourceRow(n)
     for n in sorted({f[2] for f, _ in fields_by_name.values()} - {"UNKNOWN"})
   )
+  source_directions: dict[str, tuple[float, ...]] = {}
+  for field, _ in fields_by_name.values():
+    _, direction, source = field
+    if source == "UNKNOWN":
+      continue
+    if source in source_directions and source_directions[source] != direction:
+      _fail(
+        f"SOURCE {source!r}",
+        "multiple FIELD directions cannot define one fixed SOURCE direction",
+      )
+    source_directions[source] = direction
   source_ids = {r.name: i for i, r in enumerate(source_rows)}
   field_rows = tuple(
     FieldRow(n, fields_by_name[n][0][1], source_ids.get(fields_by_name[n][0][2], -1))

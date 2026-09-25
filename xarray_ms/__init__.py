@@ -2,6 +2,7 @@ import warnings
 
 from xarray import DataTree
 
+from xarray_ms.backend.msv2.fresh_create import create_fresh_msv2
 from xarray_ms.backend.msv2.fresh_plan import (
   FreshMSv2Partition,
   FreshMSv2Plan,
@@ -21,6 +22,7 @@ __all__ = [
   "FreshMSv2TargetError",
   "FreshMSv2ValidationError",
   "plan_fresh_msv2",
+  "create_fresh_msv2",
   "multithreaded_writes",
 ]
 

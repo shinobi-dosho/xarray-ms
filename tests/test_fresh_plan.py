@@ -347,6 +347,19 @@ def test_additional_destination_collision(tmp_path):
     )
 
 
+@pytest.mark.parametrize("column", ["ANTENNA3", "CORRECTED_WEIGHT_SPECTRUM"])
+def test_canonical_non_visibility_destination_is_rejected_in_preflight(
+  tmp_path, column
+):
+  with pytest.raises(FreshMSv2ValidationError, match="writer-controlled"):
+    plan_fresh_msv2(
+      make_tree(extra=True),
+      tmp_path / "new.ms",
+      additional_visibility={"corrected": column},
+    )
+  assert not (tmp_path / "new.ms").exists()
+
+
 def test_missing_additional_visibility_reference_and_invalid_mapping_name(tmp_path):
   tree = make_tree(extra=True)
   target = tmp_path / "new.ms"
